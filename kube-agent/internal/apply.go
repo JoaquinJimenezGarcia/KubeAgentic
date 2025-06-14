@@ -48,3 +48,14 @@ func ApplyDeployment(clientset *kubernetes.Clientset, spec DeploymentSpec) error
 	_, err := clientset.AppsV1().Deployments(spec.Namespace).Create(context.TODO(), deployment, metav1.CreateOptions{})
 	return err
 }
+
+func DeleteDeployment(clientset *kubernetes.Clientset, name, namespace string) error {
+	deletePolicy := metav1.DeletePropagationForeground
+	return clientset.AppsV1().Deployments(namespace).Delete(
+		context.TODO(),
+		name,
+		metav1.DeleteOptions{
+			PropagationPolicy: &deletePolicy,
+		},
+	)
+}

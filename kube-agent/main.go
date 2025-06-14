@@ -16,9 +16,15 @@ var (
 	version      = "v0.1.0"
 )
 
+type Req struct {
+	Action       string              `json:"action"`
+	ResourceType string              `json:"resource_type"`
+	Spec         kube.DeploymentSpec `json:"spec"`
+}
+
 func main() {
 	http.HandleFunc("/context", handleContext)
-	http.HandleFunc("/apply", handleApply)
+	http.HandleFunc("/apply", handleDeployment)
 	http.HandleFunc("/health", handleHealth)
 	http.HandleFunc("/status", handleStatus)
 
@@ -50,22 +56,8 @@ func handleContext(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(ctx)
 }
 
-func handleApply(w http.ResponseWriter, r *http.Request) {
+func handleDeployment(w http.ResponseWriter, r *http.Request) {
 	atomic.AddUint64(&requestCount, 1)
-
-	var req struct {
-		Action       string              `json:"action"`
-		ResourceType string              `json:"resource_type"`
-		Spec         kube.DeploymentSpec `json:"spec"`
-	}
-	err := json.NewDecoder(r.Body).Decode(&req)
-	if err != nil || req.Action != "create" || req.ResourceType != "deployment" {
-		log.Printf("[ERROR] Invalid request: %v", err)
-		http.Error(w, "Invalid request", 400)
-		return
-	}
-
-	log.Printf("[INFO] /apply received request: %v", req)
 
 	kubeClient, err := kube.NewClient()
 	if err != nil {
@@ -74,21 +66,69 @@ func handleApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = kube.ApplyDeployment(kubeClient.Clientset, req.Spec)
-	if err != nil {
-		log.Printf("[ERROR] Couldn't create the resource: %v", err)
-		http.Error(w, err.Error(), 500)
+	var req Req
+
+	err = json.NewDecoder(r.Body).Decode(&req)
+	if err != nil || req.ResourceType != "deployment" {
+		log.Printf("[ERROR] Invalid request: %v", err)
+		http.Error(w, "Invalid request", 400)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":  "success",
-		"message": "Apply request accepted (stubbed)",
-	})
+	if req.Action == "create" {
+		err = handleApply(req, kubeClient)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "success",
+			"message": "Apply request accepted (stubbed)",
+		})
+	} else if req.Action == "delete" {
+		err = handleDelete(req, kubeClient)
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "success",
+			"message": "Delete request accepted (stubbed)",
+		})
+	}
+
+}
+
+func handleApply(req Req, kubeClient *kube.KubeClient) error {
+	log.Printf("[INFO] /apply received request: %v", req)
+
+	err := kube.ApplyDeployment(kubeClient.Clientset, req.Spec)
+	if err != nil {
+		log.Printf("[ERROR] Couldn't create the resource: %v", err)
+		return err
+	}
 
 	log.Printf("[INFO] /apply applied resources: %v", req.Spec.Name)
+
+	return nil
+}
+
+func handleDelete(req Req, kubeClient *kube.KubeClient) error {
+	log.Printf("[INFO] /delete received request: %v", req)
+
+	err := kube.DeleteDeployment(kubeClient.Clientset, req.Spec.Name, req.Spec.Namespace)
+	if err != nil {
+		log.Printf("[ERROR] Couldn't delete the resource: %v", err)
+		return err
+	}
+
+	log.Printf("[INFO] /delete applied resources: %v", req.Spec.Name)
+
+	return nil
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
